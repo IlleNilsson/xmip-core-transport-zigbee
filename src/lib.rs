@@ -333,40 +333,24 @@ impl Loopback for ZigbeeTransport {
     /// acknowledges as the node sends, so the send goes first and the take
     /// finds the transmission whole.
     fn round(&self, payload: &[u8]) -> Result<Arrived> {
-        let far = self.far_end()?;
-        self.send_to(far.address(), payload)?;
-        let arrived = far.take_one()?;
-        if arrived.bytes != payload {
-            return Err(protocol_error(
-                "sent, but what the coordinator took differs",
-            ));
-        }
-        Ok(arrived)
+        self.round_in_order(payload)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use transport::payload::{edge_payloads, patterned};
 
     /// The shapes a protocol breaks on, as the Playground lists them, up to
     /// the ceiling and one over it.
-    fn edge_payloads() -> Vec<(&'static str, Vec<u8>)> {
-        let patterned = |len: usize| -> Vec<u8> {
-            (0..len)
-                .map(|at| u8::try_from((at * 31 + at / 251) % 256).unwrap_or(0))
-                .collect()
-        };
-        vec![
-            ("empty", Vec::new()),
-            ("one byte", vec![0x2a]),
-            ("every byte", (0..=255).collect()),
-            ("nul run", vec![0; 512]),
-            ("high bytes", vec![0xff; 512]),
-            ("crlf storm", b"\r\n".repeat(400)),
+    fn payloads() -> Vec<(&'static str, Vec<u8>)> {
+        let mut payloads = edge_payloads();
+        payloads.extend([
             ("mtu", patterned(1_472)),
             ("the brim", patterned(MAX_STREAM)),
-        ]
+        ]);
+        payloads
     }
 
     #[test]
@@ -390,7 +374,7 @@ mod tests {
     #[test]
     fn the_loopback_returns_the_edges_whole_and_refuses_over_the_brim() {
         let loopback = ZigbeeTransport::loopback();
-        for (name, bytes) in edge_payloads() {
+        for (name, bytes) in payloads() {
             let arrived = loopback
                 .round(&bytes)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
