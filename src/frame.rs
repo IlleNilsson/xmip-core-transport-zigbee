@@ -6,6 +6,7 @@
 //! block's number field carries the count of blocks; every other block's
 //! carries its index.
 
+use transport::ceiling;
 use transport::error::{Result, protocol_error};
 
 /// What the network layer may hand the MAC: a 127-byte PHY packet less the
@@ -200,12 +201,7 @@ pub fn frames(header: &Header, bytes: &[u8]) -> Result<Vec<Frame>> {
     if bytes.len() <= MAX_UNFRAGMENTED {
         return Ok(vec![Frame::data(header.clone(), None, bytes)?]);
     }
-    if bytes.len() > MAX_STREAM {
-        return Err(protocol_error(format!(
-            "{} bytes is over the {MAX_STREAM} a fragmented transmission carries",
-            bytes.len()
-        )));
-    }
+    ceiling::within(bytes.len(), MAX_STREAM, "a fragmented transmission carries")?;
     let count = u8::try_from(bytes.len().div_ceil(MAX_BLOCK)).unwrap_or(u8::MAX);
     bytes
         .chunks(MAX_BLOCK)
