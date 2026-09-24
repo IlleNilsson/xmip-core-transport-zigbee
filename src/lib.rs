@@ -28,6 +28,7 @@ use std::time::Duration;
 pub use frame::{Fragment, Frame, Header, MAX_STREAM};
 pub use reassembly::Reassembly;
 use transport::error::{Result, TransportError, protocol_error};
+use transport::held::Held;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::{Arrived, Directions, Transport};
 
@@ -282,43 +283,29 @@ impl ZigbeeTransport {
     }
 }
 
-/// The coordinator, holding the transmission it took whole.
-struct Served {
-    transport: ZigbeeTransport,
-    radio: Arc<LoopbackRadio>,
-    address: String,
-}
-
-impl FarEnd for Served {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
-        let (header, bytes) = self
-            .radio
-            .take()
-            .ok_or_else(|| protocol_error("no transmission completed"))?;
-        Ok(Arrived::new(self.transport.arrival(&header), bytes))
-    }
-}
-
 impl Loopback for ZigbeeTransport {
     /// One byte counts the blocks and one block carries 98 bytes.
     fn ceiling(&self) -> Option<usize> {
         Some(MAX_STREAM)
     }
 
+    /// The coordinator, holding the transmission it took whole.
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         let radio = self
             .loopback
             .as_ref()
             .ok_or_else(|| protocol_error("a radio, not a loopback radio"))?;
-        Ok(Box::new(Served {
-            transport: self.clone(),
-            radio: Arc::clone(radio),
-            address: self.origin(self.destination, self.endpoint),
-        }))
+        let transport = self.clone();
+        let radio = Arc::clone(radio);
+        Ok(Box::new(Held::new(
+            self.origin(self.destination, self.endpoint),
+            move || {
+                let (header, bytes) = radio
+                    .take()
+                    .ok_or_else(|| protocol_error("no transmission completed"))?;
+                Ok(Arrived::new(transport.arrival(&header), bytes))
+            },
+        )))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
