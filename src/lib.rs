@@ -312,15 +312,11 @@ impl Loopback for ZigbeeTransport {
         self.clone().send(address, payload)
     }
 
-    fn unblock(&self, _address: &str) {
-        // The air is in-process; nothing listens on a socket.
-    }
-
     /// In order on one thread: the coordinator lives in the radio and
     /// acknowledges as the node sends, so the send goes first and the take
     /// finds the transmission whole.
-    fn round(&self, payload: &[u8]) -> Result<Arrived> {
-        self.round_in_order(payload)
+    fn exchanges_in_order(&self) -> bool {
+        true
     }
 }
 
