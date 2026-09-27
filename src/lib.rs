@@ -20,6 +20,7 @@
 
 pub mod frame;
 pub mod reassembly;
+mod settings;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -31,6 +32,14 @@ use transport::error::{Result, TransportError, protocol_error};
 use transport::held::Held;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::{Arrived, Directions, Transport};
+
+/// The profile a node speaks unless told otherwise: Home Automation.
+pub const PROFILE: u16 = 0x0104;
+/// The cluster a node speaks unless told otherwise: temperature measurement.
+pub const CLUSTER: u16 = 0x0402;
+/// How long a node waits for a frame or an acknowledgement unless told
+/// otherwise.
+pub const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where frames go and come from: the air, as one node hears it.
 pub trait Radio: Send + Sync {
@@ -126,20 +135,19 @@ pub struct ZigbeeTransport {
 }
 
 impl ZigbeeTransport {
-    /// A node at `address` on `radio`, endpoint 1, the Home Automation
-    /// profile and the temperature measurement cluster, sending to the
-    /// coordinator.
+    /// A node at `address` on `radio`, endpoint 1, [`PROFILE`] and
+    /// [`CLUSTER`], sending to the coordinator.
     #[must_use]
     pub fn new(radio: Arc<dyn Radio>, address: u16) -> Self {
         Self {
             radio,
             address,
             endpoint: 1,
-            profile: 0x0104,
-            cluster: 0x0402,
+            profile: PROFILE,
+            cluster: CLUSTER,
             destination: 0x0000,
             counter: Arc::new(Mutex::new(0)),
-            timeout: Duration::from_secs(5),
+            timeout: TIMEOUT,
             loopback: None,
         }
     }
