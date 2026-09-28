@@ -26,7 +26,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use codec::hex::prefixed_number;
 pub use frame::{Fragment, Frame, Header, MAX_STREAM};
+use net::Target;
 pub use reassembly::Reassembly;
 use transport::error::{Result, TransportError, protocol_error};
 use transport::held::Held;
@@ -261,13 +263,14 @@ impl Transport for ZigbeeTransport {
     /// `target` may name a node and endpoint, `zigbee://radio/0x0000/1`,
     /// overriding the transport's.
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        let (destination, endpoint) = match transport::socket::target("zigbee", target) {
+        let (destination, endpoint) = match Target::under(&["zigbee"], target)
+            .map(|named| (named.authority(), named.path()))
+        {
             Some((_, path)) if !path.is_empty() => {
                 let (address, endpoint) = path.split_once('/').unwrap_or((path, "1"));
                 let refused = || protocol_error(format!("{path:?} is not a node and endpoint"));
-                let address = address.strip_prefix("0x").ok_or_else(refused)?;
                 (
-                    u16::from_str_radix(address, 16).map_err(|_| refused())?,
+                    prefixed_number(address).map_err(|_| refused())?,
                     endpoint.parse().map_err(|_| refused())?,
                 )
             }

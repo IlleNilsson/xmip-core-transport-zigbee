@@ -6,23 +6,23 @@
 //! block's number field carries the count of blocks; every other block's
 //! carries its index.
 
-use transport::ceiling;
+use net::ceiling;
 use transport::error::{Result, protocol_error};
 
 /// What the network layer may hand the MAC: a 127-byte PHY packet less the
 /// eleven bytes of a MAC header with short addresses and its check sequence.
 pub const MAX_NPDU: usize = 116;
 /// The network header: two of frame control, two addresses, radius, sequence.
-pub const NWK_HEADER: usize = 8;
+const NWK_HEADER: usize = 8;
 /// The APS header of a data frame without the extended header.
-pub const APS_HEADER: usize = 8;
+const APS_HEADER: usize = 8;
 /// What one unfragmented data frame carries.
 pub const MAX_UNFRAGMENTED: usize = MAX_NPDU - NWK_HEADER - APS_HEADER;
 /// What one block of a fragmented transmission carries: two bytes less, for
 /// the extended header.
 pub const MAX_BLOCK: usize = MAX_UNFRAGMENTED - 2;
 /// The most blocks one transmission has: the count travels in one byte.
-pub const MAX_BLOCKS: usize = 255;
+const MAX_BLOCKS: usize = 255;
 /// The largest Stream a fragmented transmission carries whole.
 pub const MAX_STREAM: usize = MAX_BLOCKS * MAX_BLOCK;
 
