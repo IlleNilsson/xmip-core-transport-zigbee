@@ -13,6 +13,17 @@
 //! transmission, and the acknowledgement. A Send Location addresses a node
 //! and endpoint; a Receive Location is a node taking what is sent to it.
 //!
+//! **The sender is acknowledged after the whole receive cycle.** The APS
+//! acknowledgement of the frame that completes a transmission is sent on
+//! [`transport::Verdict::Accepted`] and withheld on
+//! [`transport::Verdict::Failed`], so the sender's retries send it again.
+//! APS has no negative acknowledgement (Zigbee Specification, chapter 2.2,
+//! the APS sub-layer), so nothing tells a
+//! sender *refused, do not send again*: on [`transport::Verdict::Refused`]
+//! the acknowledgement is sent, the transmission taken and not sent again,
+//! and the refusal is what the runtime audited. A transmission that asked for no
+//! acknowledgement is at-most-once ([`AT_MOST_ONCE`]). Each arrives whole.
+//!
 //! The radio is a trait: [`LoopbackRadio`] is the receiving node in-process,
 //! which every test and every box without an 802.15.4 radio drives, the way
 //! can-bus drives its loopback bus. The origin URI names the radio, the
@@ -33,7 +44,12 @@ pub use reassembly::Reassembly;
 use transport::error::{Result, TransportError, protocol_error};
 use transport::held::Held;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Arrived, Directions, Transport};
+use transport::{Acknowledgement, Arrived, Directions, Taken, Transport, Verdict};
+
+/// Why a transmission that asked for no acknowledgement cannot be
+/// acknowledged after the receive cycle.
+pub const AT_MOST_ONCE: &str = "a Zigbee APS frame that asks for no acknowledgement waits for \
+                                nobody: the sender sent it once";
 
 /// The profile a node speaks unless told otherwise: Home Automation.
 pub const PROFILE: u16 = 0x0104;
@@ -211,8 +227,11 @@ impl ZigbeeTransport {
         Ok(())
     }
 
-    /// Take one transmission sent to this node, acknowledging as it comes,
-    /// or `None` when nothing arrived in time.
+    /// Take one transmission sent to this node, whole, or `None` when
+    /// nothing arrived in time. The APS acknowledgement of the frame that
+    /// completes it is the arrival's verdict: sent on accepted, withheld on
+    /// refused, so the sender's APS retries send it again. A transmission
+    /// that asked for no acknowledgement is at-most-once ([`AT_MOST_ONCE`]).
     ///
     /// # Errors
     /// Where the radio could not be read or a frame was out of place.
@@ -224,11 +243,31 @@ impl ZigbeeTransport {
         let mut bytes = first;
         loop {
             let response = node.handle(&Frame::decode(&bytes)?)?;
+            if let Some((header, payload)) = response.complete {
+                let acknowledgement = if response.acks.is_empty() {
+                    Acknowledgement::at_most_once(AT_MOST_ONCE)
+                } else {
+                    let radio = Arc::clone(&self.radio);
+                    let acks = response.acks;
+                    Acknowledgement::deferred(move |verdict| {
+                        // APS has no negative acknowledgement: a refused
+                        // transmission is acknowledged, taken for good.
+                        if matches!(verdict, Verdict::Accepted | Verdict::Refused(_)) {
+                            for ack in &acks {
+                                radio.transmit(&ack.encode())?;
+                            }
+                        }
+                        Ok(())
+                    })
+                };
+                return Ok(Some(Arrived::whole(
+                    self.arrival(&header),
+                    payload,
+                    acknowledgement,
+                )));
+            }
             for ack in &response.acks {
                 self.radio.transmit(&ack.encode())?;
-            }
-            if let Some((header, payload)) = response.complete {
-                return Ok(Some(Arrived::new(self.arrival(&header), payload)));
             }
             bytes = self
                 .radio
@@ -255,7 +294,13 @@ impl Transport for ZigbeeTransport {
         Directions::BOTH
     }
 
-    /// Nothing on the air is not an error: an empty vector.
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Ordered("one line or bus, answered in the order it speaks")
+    }
+
+    /// Nothing on the air is not an error: an empty vector. The APS
+    /// acknowledgement waits for the receive cycle: sent on accepted,
+    /// withheld on refused.
     fn receive(&self) -> Result<Vec<Arrived>> {
         Ok(self.receive_one()?.into_iter().collect())
     }
@@ -314,7 +359,7 @@ impl Loopback for ZigbeeTransport {
                 let (header, bytes) = radio
                     .take()
                     .ok_or_else(|| protocol_error("no transmission completed"))?;
-                Ok(Arrived::new(transport.arrival(&header), bytes))
+                Ok(Taken::new(transport.arrival(&header), bytes))
             },
         )))
     }
@@ -437,15 +482,30 @@ mod tests {
         );
         let sender = ZigbeeTransport::new(Arc::new(End(air, false)), 0x1a2b)
             .speaking(0x0104, 0x0006)
-            .timing_out_after(Duration::from_secs(2));
-        let sending = std::thread::spawn(move || sender.send("zigbee://air", &[9; 300]));
-        let arrived = node.receive().expect("taking");
-        sending.join().expect("thread").expect("sending");
+            .timing_out_after(Duration::from_millis(200));
+        let sending = std::thread::spawn(move || {
+            // Refused: acknowledged, taken for good, so the send succeeds.
+            sender.send("zigbee://air", &[7; 300])?;
+            let refused = sender
+                .send("zigbee://air", &[9; 300])
+                .expect_err("no acknowledgement");
+            sender.send("zigbee://air", &[9; 300])?;
+            Ok::<_, TransportError>(refused)
+        });
+        let refused = node.receive().expect("taking").remove(0);
+        assert!(refused.defers(), "the sender waits for its acknowledgement");
+        refused
+            .refused(transport::Refusal::Unacceptable)
+            .expect("acknowledged");
+        // Failed: the acknowledgement is withheld, and the sender retries.
+        let first = node.receive().expect("taking").remove(0);
+        first.failed().expect("failed");
+        let mut arrived = node.receive().expect("taking again");
         assert_eq!(arrived.len(), 1);
-        assert_eq!(arrived[0].bytes, [9; 300]);
-        assert_eq!(
-            arrived[0].origin_uri,
-            "zigbee://air/0x1a2b/1?cluster=0x0006"
-        );
+        let arrived = arrived.remove(0).taken().expect("acknowledged");
+        let refused = sending.join().expect("thread").expect("sent again");
+        assert!(refused.retryable, "{refused}");
+        assert_eq!(arrived.bytes, [9; 300]);
+        assert_eq!(arrived.origin_uri, "zigbee://air/0x1a2b/1?cluster=0x0006");
     }
 }
