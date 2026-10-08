@@ -41,6 +41,7 @@ use codec::hex::prefixed_number;
 pub use frame::{Fragment, Frame, Header, MAX_STREAM};
 use net::Target;
 pub use reassembly::Reassembly;
+use transport::ArrivalIdentity;
 use transport::error::{Result, TransportError, protocol_error};
 use transport::held::Held;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
@@ -260,11 +261,13 @@ impl ZigbeeTransport {
                         Ok(())
                     })
                 };
-                return Ok(Some(Arrived::whole(
-                    self.arrival(&header),
-                    payload,
-                    acknowledgement,
-                )));
+                // The sender's short address: an IEEE 802.15.4 link-layer
+                // address, which is what `peer.mac` names (ADR-0050 section 3).
+                let sender = format!("{:#06x}", header.source);
+                return Ok(Some(
+                    Arrived::whole(self.arrival(&header), payload, acknowledgement)
+                        .from_peer_mac(&sender),
+                ));
             }
             for ack in &response.acks {
                 self.radio.transmit(&ack.encode())?;
@@ -340,6 +343,10 @@ impl ZigbeeTransport {
 }
 
 impl Loopback for ZigbeeTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::PEER_MAC
+    }
+
     /// One byte counts the blocks and one block carries 98 bytes.
     fn ceiling(&self) -> Option<usize> {
         Some(MAX_STREAM)
@@ -359,7 +366,8 @@ impl Loopback for ZigbeeTransport {
                 let (header, bytes) = radio
                     .take()
                     .ok_or_else(|| protocol_error("no transmission completed"))?;
-                Ok(Taken::new(transport.arrival(&header), bytes))
+                let sender = format!("{:#06x}", header.source);
+                Ok(Taken::new(transport.arrival(&header), bytes).from_peer_mac(&sender))
             },
         )))
     }
