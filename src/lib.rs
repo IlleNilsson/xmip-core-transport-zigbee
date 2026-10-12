@@ -301,6 +301,10 @@ impl Transport for ZigbeeTransport {
         transport::Arrivals::Ordered("one line or bus, answered in the order it speaks")
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Polled("a read of the loopback radio returns at once")
+    }
+
     /// Nothing on the air is not an error: an empty vector. The APS
     /// acknowledgement waits for the receive cycle: sent on accepted,
     /// withheld on refused.
