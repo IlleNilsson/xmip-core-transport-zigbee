@@ -308,13 +308,18 @@ impl Transport for ZigbeeTransport {
     /// Nothing on the air is not an error: an empty vector. The APS
     /// acknowledgement waits for the receive cycle: sent on accepted,
     /// withheld on refused.
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         Ok(self.receive_one()?.into_iter().collect())
+    }
+
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one ZigBee frame carries the whole body")
     }
 
     /// `target` may name a node and endpoint, `zigbee://radio/0x0000/1`,
     /// overriding the transport's.
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         let (destination, endpoint) = match Target::under(&["zigbee"], target)
             .map(|named| (named.authority(), named.path()))
         {
