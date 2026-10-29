@@ -55,6 +55,9 @@ impl Configured for ZigbeeTransport {
         ],
     };
 
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["zigbee"];
+
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let radio: Arc<dyn Radio> = match address {
             "loopback" => Arc::new(LoopbackRadio::new()),
