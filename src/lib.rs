@@ -45,7 +45,7 @@ use transport::ArrivalIdentity;
 use transport::error::{Result, TransportError, protocol_error};
 use transport::held::Held;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Acknowledgement, Arrived, Directions, Taken, Transport, Verdict};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Taken, Transport, Verdict};
 
 /// Why a transmission that asked for no acknowledgement cannot be
 /// acknowledged after the receive cycle.
@@ -320,7 +320,7 @@ impl Transport for ZigbeeTransport {
     /// overriding the transport's.
     fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
         let bytes: &[u8] = &outgoing.gather()?;
-        let (destination, endpoint) = match Target::under(&["zigbee"], target)
+        let (destination, endpoint) = match Target::under(Self::SCHEMES, target)
             .map(|named| (named.authority(), named.path()))
         {
             Some((_, path)) if !path.is_empty() => {
