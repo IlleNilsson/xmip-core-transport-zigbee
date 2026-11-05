@@ -398,7 +398,7 @@ mod tests {
     use super::*;
     use transport::payload::{edge_payloads, patterned};
 
-    /// The shapes a protocol breaks on, as the Playground lists them, up to
+    /// The shapes a protocol breaks on, as the Essentials lists them, up to
     /// the ceiling and one over it.
     fn payloads() -> Vec<(&'static str, Vec<u8>)> {
         let mut payloads = edge_payloads();
