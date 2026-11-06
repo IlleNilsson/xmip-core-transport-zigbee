@@ -34,8 +34,9 @@ pub mod reassembly;
 mod settings;
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xcore::lock::Locked;
 
 use codec::hex::prefixed_number;
 pub use frame::{Fragment, Frame, Header, MAX_STREAM};
@@ -95,10 +96,7 @@ impl LoopbackRadio {
     /// The next transmission the node took whole.
     #[must_use]
     pub fn take(&self) -> Option<(Header, Vec<u8>)> {
-        self.arrived
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop_front()
+        self.arrived.locked().pop_front()
     }
 }
 
@@ -109,30 +107,18 @@ impl Radio for LoopbackRadio {
 
     fn transmit(&self, bytes: &[u8]) -> Result<()> {
         let frame = Frame::decode(bytes)?;
-        let response = self
-            .node
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .handle(&frame)?;
+        let response = self.node.locked().handle(&frame)?;
         self.to_sender
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .locked()
             .extend(response.acks.iter().map(Frame::encode));
         if let Some(complete) = response.complete {
-            self.arrived
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push_back(complete);
+            self.arrived.locked().push_back(complete);
         }
         Ok(())
     }
 
     fn receive(&self, _timeout: Duration) -> Result<Option<Vec<u8>>> {
-        Ok(self
-            .to_sender
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop_front())
+        Ok(self.to_sender.locked().pop_front())
     }
 }
 
@@ -193,7 +179,7 @@ impl ZigbeeTransport {
     }
 
     fn next_counter(&self) -> u8 {
-        let mut counter = self.counter.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut counter = self.counter.locked();
         let next = *counter;
         *counter = counter.wrapping_add(1);
         next
