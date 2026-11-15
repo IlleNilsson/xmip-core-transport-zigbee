@@ -45,18 +45,20 @@ impl Configured for ZigbeeTransport {
                 meaning: "The cluster a sent frame names.",
                 applies: Applies::Send,
             },
-            Setting {
-                name: "timeout",
-                kind: Kind::Duration,
-                presence: Presence::Default(Fixed::Duration(TIMEOUT)),
-                meaning: "How long a frame or an acknowledgement is waited for.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                Some(TIMEOUT),
+                "How long a frame or an acknowledgement is waited for.",
+            ),
         ],
     };
 
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["zigbee"];
+
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.timeout)
+    }
 
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let radio: Arc<dyn Radio> = match address {
@@ -76,8 +78,7 @@ impl Configured for ZigbeeTransport {
         // sent to it, so it keeps the node's own.
         let short_address = u16::try_from(settings.integer("short_address"))
             .map_err(|_| protocol_error("a short address over 0xfff7"))?;
-        let node = ZigbeeTransport::new(radio, short_address)
-            .timing_out_after(settings.duration("timeout"));
+        let node = ZigbeeTransport::new(radio, short_address);
         Ok(node.speaking(sixteen("profile", PROFILE)?, sixteen("cluster", CLUSTER)?))
     }
 }

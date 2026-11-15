@@ -165,13 +165,6 @@ impl ZigbeeTransport {
         self
     }
 
-    /// Give up on an acknowledgement that does not come within `timeout`.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
     /// `zigbee://<radio>/<address>/<endpoint>`.
     #[must_use]
     pub fn origin(&self, address: u16, endpoint: u8) -> String {
