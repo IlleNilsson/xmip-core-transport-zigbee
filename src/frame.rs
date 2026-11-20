@@ -266,7 +266,10 @@ mod tests {
         let whole = super::frames(&header(), &[0; MAX_UNFRAGMENTED]).expect("whole");
         assert_eq!(whole.len(), 1);
         assert!(whole[0].fragment.is_none());
-        assert_eq!(super::frames(&header(), &[]).expect("empty")[0].payload, []);
+        assert_eq!(
+            super::frames(&header(), &[]).expect("empty")[0].payload,
+            b""
+        );
     }
 
     #[test]
