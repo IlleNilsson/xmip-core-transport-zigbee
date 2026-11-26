@@ -1,60 +1,20 @@
-//! The settings a Zigbee Location takes, and the one way a node is built
-//! from them (ADR-0064, amendment 2026-09-26).
+//! How a Zigbee Location is configured: `Configured`, reading the settings
+//! its [`declaration`](crate::declaration) declares once, and the one way a
+//! node is built from them (ADR-0064, amendments 2026-09-26 and
+//! 2026-11-26).
 
 use std::sync::Arc;
 
 use transport::Configured;
 use transport::error::{Result, protocol_error};
-use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
+use xcore::settings::{Read, Settings};
 
-use crate::{CLUSTER, LoopbackRadio, PROFILE, Radio, TIMEOUT, ZigbeeTransport};
-
-/// A sixteen-bit identifier.
-const SIXTEEN: Kind = Kind::Integer {
-    minimum: 0,
-    maximum: 0xffff,
-};
+use crate::declaration::{self, CLUSTER, PROFILE};
+use crate::{LoopbackRadio, Radio, ZigbeeTransport};
 
 impl Configured for ZigbeeTransport {
-    /// The address names the radio. `loopback`, the in-process node, is the
-    /// one the estate has; an 802.15.4 radio joins when it exposes one.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "short_address",
-                kind: Kind::Integer {
-                    minimum: 0,
-                    maximum: 0xfff7,
-                },
-                presence: Presence::Required,
-                meaning: "This node's short address in the network.",
-                applies: Applies::Both,
-            },
-            Setting {
-                name: "profile",
-                kind: SIXTEEN,
-                presence: Presence::Default(Fixed::Integer(PROFILE as i64)),
-                meaning: "The application profile a sent frame names.",
-                applies: Applies::Send,
-            },
-            Setting {
-                name: "cluster",
-                kind: SIXTEEN,
-                presence: Presence::Default(Fixed::Integer(CLUSTER as i64)),
-                meaning: "The cluster a sent frame names.",
-                applies: Applies::Send,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                Some(TIMEOUT),
-                "How long a frame or an acknowledgement is waited for.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["zigbee"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
         Some(&mut self.timeout)
@@ -86,7 +46,8 @@ impl Configured for ZigbeeTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xcore::settings::Given;
+    use crate::declaration::TIMEOUT;
+    use xcore::settings::{Applies, Given};
 
     #[test]
     fn zigbee_declares_its_settings_and_reads_through_them() {

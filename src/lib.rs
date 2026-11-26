@@ -28,102 +28,65 @@
 //! which every test and every box without an 802.15.4 radio drives, the way
 //! can-bus drives its loopback bus. The origin URI names the radio, the
 //! sender and the cluster: `zigbee://loopback/0x1a2b/1?cluster=0x0402`.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, wherever it
+//! is built, and none of the code above, which is behind the default
+//! feature: what the surfaces' library carries (ADR-0064, amendment
+//! 2026-11-26). The profile, the cluster and the wait a node takes unless
+//! told otherwise, `PROFILE`, `CLUSTER` and `TIMEOUT`, are declared there
+//! with it.
 
+#[cfg(feature = "default")]
+mod configured;
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod frame;
+#[cfg(feature = "default")]
+mod radio;
+#[cfg(feature = "default")]
 pub mod reassembly;
-mod settings;
 
-use std::collections::VecDeque;
+#[cfg(feature = "default")]
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "default")]
 use std::time::Duration;
+#[cfg(feature = "default")]
 use xcore::lock::Locked;
 
+#[cfg(feature = "default")]
 use codec::hex::prefixed_number;
+#[cfg(feature = "default")]
+use declaration::{CLUSTER, PROFILE, TIMEOUT};
+#[cfg(feature = "default")]
 pub use frame::{Fragment, Frame, Header, MAX_STREAM};
+#[cfg(feature = "default")]
 use net::Target;
+#[cfg(feature = "default")]
+pub use radio::{LoopbackRadio, Radio};
+#[cfg(feature = "default")]
 pub use reassembly::Reassembly;
+#[cfg(feature = "default")]
 use transport::ArrivalIdentity;
+#[cfg(feature = "default")]
 use transport::error::{Result, TransportError, protocol_error};
+#[cfg(feature = "default")]
 use transport::held::Held;
+#[cfg(feature = "default")]
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
+#[cfg(feature = "default")]
 use transport::{Acknowledgement, Arrived, Configured, Directions, Taken, Transport, Verdict};
 
 /// Why a transmission that asked for no acknowledgement cannot be
 /// acknowledged after the receive cycle.
+#[cfg(feature = "default")]
 pub const AT_MOST_ONCE: &str = "a Zigbee APS frame that asks for no acknowledgement waits for \
                                 nobody: the sender sent it once";
 
-/// The profile a node speaks unless told otherwise: Home Automation.
-pub const PROFILE: u16 = 0x0104;
-/// The cluster a node speaks unless told otherwise: temperature measurement.
-pub const CLUSTER: u16 = 0x0402;
-/// How long a node waits for a frame or an acknowledgement unless told
-/// otherwise.
-pub const TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Where frames go and come from: the air, as one node hears it.
-pub trait Radio: Send + Sync {
-    /// The radio's name, for the origin URI.
-    fn name(&self) -> &str;
-    /// Put a frame on the air.
-    ///
-    /// # Errors
-    /// Where the radio refused it.
-    fn transmit(&self, frame: &[u8]) -> Result<()>;
-    /// The next frame, or `None` when nothing arrived within `timeout`.
-    ///
-    /// # Errors
-    /// Where the radio could not be read.
-    fn receive(&self, timeout: Duration) -> Result<Option<Vec<u8>>>;
-}
-
-/// The receiving node in-process: what the sender transmits, the node
-/// reassembles and acknowledges, and the acknowledgement is what the
-/// sender receives next.
-#[derive(Default)]
-pub struct LoopbackRadio {
-    node: Mutex<Reassembly>,
-    to_sender: Mutex<VecDeque<Vec<u8>>>,
-    arrived: Mutex<VecDeque<(Header, Vec<u8>)>>,
-}
-
-impl LoopbackRadio {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The next transmission the node took whole.
-    #[must_use]
-    pub fn take(&self) -> Option<(Header, Vec<u8>)> {
-        self.arrived.locked().pop_front()
-    }
-}
-
-impl Radio for LoopbackRadio {
-    fn name(&self) -> &'static str {
-        "loopback"
-    }
-
-    fn transmit(&self, bytes: &[u8]) -> Result<()> {
-        let frame = Frame::decode(bytes)?;
-        let response = self.node.locked().handle(&frame)?;
-        self.to_sender
-            .locked()
-            .extend(response.acks.iter().map(Frame::encode));
-        if let Some(complete) = response.complete {
-            self.arrived.locked().push_back(complete);
-        }
-        Ok(())
-    }
-
-    fn receive(&self, _timeout: Duration) -> Result<Option<Vec<u8>>> {
-        Ok(self.to_sender.locked().pop_front())
-    }
-}
-
 /// One node on one radio: a short address, an endpoint, and the profile and
 /// cluster it speaks.
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct ZigbeeTransport {
     radio: Arc<dyn Radio>,
@@ -139,6 +102,7 @@ pub struct ZigbeeTransport {
     loopback: Option<Arc<LoopbackRadio>>,
 }
 
+#[cfg(feature = "default")]
 impl ZigbeeTransport {
     /// A node at `address` on `radio`, endpoint 1, [`PROFILE`] and
     /// [`CLUSTER`], sending to the coordinator.
@@ -267,6 +231,7 @@ impl ZigbeeTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Transport for ZigbeeTransport {
     fn name(&self) -> &'static str {
         "zigbee"
@@ -316,6 +281,7 @@ impl Transport for ZigbeeTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl ZigbeeTransport {
     /// Both ends on one in-process radio: a node at `0x1a2b` sending to the
     /// coordinator, and the coordinator taking and acknowledging, the
@@ -330,6 +296,7 @@ impl ZigbeeTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Loopback for ZigbeeTransport {
     fn arrival_identity(&self) -> ArrivalIdentity {
         ArrivalIdentity::PEER_MAC
@@ -375,6 +342,7 @@ impl Loopback for ZigbeeTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use transport::payload::{edge_payloads, patterned};
 
     /// The shapes a protocol breaks on, as the System Tests list them, up to
