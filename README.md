@@ -1,10 +1,38 @@
 # xmip-core-transport-zigbee
 
-Zigbee transport: APS framing over the network layer — a Stream is one APS data frame, or a fragmented transmission of numbered blocks acknowledged by the receiver; a loopback radio stands in for the coordinator. A technology of [xmip-core-transport](https://github.com/IlleNilsson/xmip-core-transport).
+Zigbee transport: APS framing over the network layer — a Stream is one APS data frame, or a fragmented transmission of numbered blocks acknowledged by the receiver; an 802.15.4 interface of Linux's kernel, or a loopback radio in process. A technology of [xmip-core-transport](https://github.com/IlleNilsson/xmip-core-transport).
 
 A send target is read by `net::Target` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net), the one reading of a URI every technology calls: scheme, authority, path and decoded query. Until 2026-09-28 it was read through the transport capability's `socket::target`, which split it on its first slash and left the query in the path.
 
 A `0x` number in a target is read by `codec::hex::prefixed_number` in [xmip-core-library-codec](https://github.com/IlleNilsson/xmip-core-library-codec), which refuses a sign; until 2026-09-28 it was read with `from_str_radix`, which took `0x+7e8`.
+
+## The radio
+
+The radio is the transport capability's `ieee802154::Radio`, and a frame's
+MAC header and check sequence are the radio's: this crate hands it the
+network frame, to the short address the network header names — one hop, no
+route — and takes frames back with the short address that sent them
+(ADR-0051, amendment 2026-11-27). A Location's address names the radio:
+
+- **an interface of Linux's kernel**, `zigbee://wpan0`, an `AF_IEEE802154`
+  datagram socket bound to the interface's own PAN and short address
+  (`net::ieee802154::Interface`), which a user opens with no capability.
+  The Location's `short_address` must be the interface's, since the
+  kernel's MAC sends from it; another is refused, naming both. Elsewhere,
+  and on a Linux whose kernel carries no 802.15.4 sockets, it is refused in
+  words, so `xmip-service` links Zigbee on Linux alone;
+- **`loopback`**, the receiving node in process, the coordinator
+  reassembling and acknowledging, which every test and the System Tests
+  drive (`src/loopback.rs`).
+
+A Send Location's address may name the node and endpoint it sends to after
+the radio, as a target does: `zigbee://wpan0/0x0002/1`; the coordinator's
+first endpoint where it names none. Proven through a node on Linux's two
+virtual radios, `mac802154_hwsim`'s `wpan0` and `wpan1`, by the estate's
+service test (`aired.rs`), the far end acknowledging as it takes. What one
+frame carries above the MAC, `frame::MAX_NPDU`, is the radio's
+`net::ieee802154::MAX_PAYLOAD`; until 2026-11-27 it was written here as a
+number, and the crate had no radio but the loopback.
 
 ## Acknowledgement
 

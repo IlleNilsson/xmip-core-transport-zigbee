@@ -24,10 +24,17 @@
 //! and the refusal is what the runtime audited. A transmission that asked for no
 //! acknowledgement is at-most-once ([`AT_MOST_ONCE`]). Each arrives whole.
 //!
-//! The radio is a trait: [`LoopbackRadio`] is the receiving node in-process,
+//! The radio is the capability's `ieee802154::Radio`, and the network
+//! frame goes in one 802.15.4 frame's payload, to the short address the
+//! network header names: a Location's address names an interface of
+//! Linux's kernel, `zigbee://wpan0`, the node's `short_address` the
+//! interface's own; or [`LoopbackRadio`], the receiving node in process,
 //! which every test and every box without an 802.15.4 radio drives, the way
-//! can-bus drives its loopback bus. The origin URI names the radio, the
-//! sender and the cluster: `zigbee://loopback/0x1a2b/1?cluster=0x0402`.
+//! can-bus drives its loopback bus. A Send Location's address may name the
+//! node and endpoint it sends to after the radio,
+//! `zigbee://wpan0/0x0002/1`, as a target does; the coordinator's first
+//! endpoint where it names none. The origin URI names the radio, the sender
+//! and the cluster: `zigbee://loopback/0x1a2b/1?cluster=0x0402`.
 //!
 //! **Built with its `declaration` feature alone** the crate is
 //! [`declaration`]. It is the same wherever it is built. The profile, the
@@ -41,7 +48,7 @@ pub mod declaration;
 #[cfg(feature = "default")]
 pub mod frame;
 #[cfg(feature = "default")]
-mod radio;
+mod loopback;
 #[cfg(feature = "default")]
 pub mod reassembly;
 
@@ -59,21 +66,24 @@ use declaration::{CLUSTER, PROFILE, TIMEOUT};
 #[cfg(feature = "default")]
 pub use frame::{Fragment, Frame, Header, MAX_STREAM};
 #[cfg(feature = "default")]
+pub use loopback::LoopbackRadio;
+#[cfg(feature = "default")]
 use net::Target;
 #[cfg(feature = "default")]
-pub use radio::{LoopbackRadio, Radio};
-#[cfg(feature = "default")]
 pub use reassembly::Reassembly;
-#[cfg(feature = "default")]
-use transport::ArrivalIdentity;
 #[cfg(feature = "default")]
 use transport::error::{Result, TransportError, protocol_error};
 #[cfg(feature = "default")]
 use transport::held::Held;
 #[cfg(feature = "default")]
+use transport::ieee802154::Radio;
+#[cfg(feature = "default")]
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 #[cfg(feature = "default")]
-use transport::{Acknowledgement, Arrived, Configured, Directions, Taken, Transport, Verdict};
+use transport::{
+    Acknowledgement, ArrivalIdentity, Arrived, Configured, Directions, Taken, Transport, Verdict,
+    Waiting,
+};
 
 /// Why a transmission that asked for no acknowledgement cannot be
 /// acknowledged after the receive cycle.
@@ -132,6 +142,17 @@ impl ZigbeeTransport {
         format!("zigbee://{}/{address:#06x}/{endpoint}", self.radio.name())
     }
 
+    /// The node and endpoint a target's or an address's path names:
+    /// `0x0000/1`, the first endpoint where it names none.
+    fn node_and_endpoint(path: &str) -> Result<(u16, u8)> {
+        let (address, endpoint) = path.split_once('/').unwrap_or((path, "1"));
+        let refused = || protocol_error(format!("{path:?} is not a node and endpoint"));
+        Ok((
+            prefixed_number(address).map_err(|_| refused())?,
+            endpoint.parse().map_err(|_| refused())?,
+        ))
+    }
+
     fn next_counter(&self) -> u8 {
         let mut counter = self.counter.locked();
         let next = *counter;
@@ -140,7 +161,8 @@ impl ZigbeeTransport {
     }
 
     /// Send `bytes` to `destination` as one transmission and wait for its
-    /// acknowledgement.
+    /// acknowledgement. One hop: each frame goes to the short address its
+    /// network header names.
     ///
     /// # Errors
     /// More than a transmission carries, a radio that refused a frame, or
@@ -155,13 +177,13 @@ impl ZigbeeTransport {
             counter: self.next_counter(),
         };
         for frame in frame::frames(&header, bytes)? {
-            self.radio.transmit(&frame.encode())?;
+            self.radio.transmit(destination, &frame.encode())?;
         }
         let ack = self
             .radio
             .receive(self.timeout)?
             .ok_or_else(|| TransportError::retryable("no acknowledgement came"))?;
-        let ack = Frame::decode(&ack)?;
+        let ack = Frame::decode(&ack.payload)?;
         if !ack.ack || ack.header.counter != header.counter {
             return Err(protocol_error("an acknowledgement of something else"));
         }
@@ -178,12 +200,11 @@ impl ZigbeeTransport {
     /// Where the radio could not be read or a frame was out of place.
     pub fn receive_one(&self) -> Result<Option<Arrived>> {
         let mut node = Reassembly::new();
-        let Some(first) = self.radio.receive(self.timeout)? else {
+        let Some(mut heard) = self.radio.receive(self.timeout)? else {
             return Ok(None);
         };
-        let mut bytes = first;
         loop {
-            let response = node.handle(&Frame::decode(&bytes)?)?;
+            let response = node.handle(&Frame::decode(&heard.payload)?)?;
             if let Some((header, payload)) = response.complete {
                 let acknowledgement = if response.acks.is_empty() {
                     Acknowledgement::at_most_once(AT_MOST_ONCE)
@@ -195,7 +216,7 @@ impl ZigbeeTransport {
                         // transmission is acknowledged, taken for good.
                         if matches!(verdict, Verdict::Accepted | Verdict::Refused(_)) {
                             for ack in &acks {
-                                radio.transmit(&ack.encode())?;
+                                radio.transmit(ack.header.destination, &ack.encode())?;
                             }
                         }
                         Ok(())
@@ -210,9 +231,9 @@ impl ZigbeeTransport {
                 ));
             }
             for ack in &response.acks {
-                self.radio.transmit(&ack.encode())?;
+                self.radio.transmit(ack.header.destination, &ack.encode())?;
             }
-            bytes = self
+            heard = self
                 .radio
                 .receive(self.timeout)?
                 .ok_or_else(|| TransportError::retryable("the sender went quiet"))?;
@@ -242,8 +263,8 @@ impl Transport for ZigbeeTransport {
         transport::Arrivals::Ordered("one line or bus, answered in the order it speaks")
     }
 
-    fn waiting(&self) -> transport::Waiting {
-        transport::Waiting::Polled("a read of the loopback radio returns at once")
+    fn waiting(&self) -> Waiting {
+        self.radio.waiting()
     }
 
     /// Nothing on the air is not an error: an empty vector. The APS
@@ -261,19 +282,11 @@ impl Transport for ZigbeeTransport {
     /// overriding the transport's.
     fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
         let bytes: &[u8] = &outgoing.gather()?;
-        let (destination, endpoint) = match Target::under(Self::SCHEMES, target)
-            .map(|named| (named.authority(), named.path()))
-        {
-            Some((_, path)) if !path.is_empty() => {
-                let (address, endpoint) = path.split_once('/').unwrap_or((path, "1"));
-                let refused = || protocol_error(format!("{path:?} is not a node and endpoint"));
-                (
-                    prefixed_number(address).map_err(|_| refused())?,
-                    endpoint.parse().map_err(|_| refused())?,
-                )
-            }
-            _ => (self.destination, self.endpoint),
-        };
+        let (destination, endpoint) =
+            match Target::under(Self::SCHEMES, target).map(|named| named.path()) {
+                Some(path) if !path.is_empty() => Self::node_and_endpoint(path)?,
+                _ => (self.destination, self.endpoint),
+            };
         self.send_stream(destination, endpoint, bytes)
     }
 }
@@ -339,6 +352,7 @@ impl Loopback for ZigbeeTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use net::ieee802154::Heard;
     use std::collections::VecDeque;
     use transport::payload::{edge_payloads, patterned};
 
@@ -369,6 +383,10 @@ mod tests {
         assert_eq!(loopback.name(), "zigbee");
         assert!(loopback.directions().receives() && loopback.directions().sends());
         assert!(loopback.claims().is_none());
+        assert!(
+            loopback.waiting().polled(),
+            "the loopback radio returns at once"
+        );
     }
 
     #[test]
@@ -400,28 +418,34 @@ mod tests {
 
     #[test]
     fn the_node_takes_a_transmission_over_any_radio() {
-        // Two ends of one air: what one transmits, the other receives. The
-        // sender runs on another thread and the node takes the transmission.
+        // Two ends of one air: what one transmits, the other hears, from
+        // the short address it sent from, to the one the network header
+        // names. The sender runs on another thread and the node takes the
+        // transmission.
         struct Air {
-            up: Mutex<VecDeque<Vec<u8>>>,
-            down: Mutex<VecDeque<Vec<u8>>>,
+            up: Mutex<VecDeque<Heard>>,
+            down: Mutex<VecDeque<Heard>>,
         }
-        struct End(Arc<Air>, bool);
+        struct End(Arc<Air>, bool, u16);
         impl Radio for End {
             fn name(&self) -> &'static str {
                 "air"
             }
-            fn transmit(&self, frame: &[u8]) -> Result<()> {
+            fn transmit(&self, destination: u16, frame: &[u8]) -> Result<()> {
+                assert_eq!(destination, if self.1 { 0x1a2b } else { 0 }, "one hop");
                 let queue = if self.1 { &self.0.down } else { &self.0.up };
-                queue.lock().expect("lock").push_back(frame.to_vec());
+                queue.lock().expect("lock").push_back(Heard {
+                    source: self.2,
+                    payload: frame.to_vec(),
+                });
                 Ok(())
             }
-            fn receive(&self, timeout: Duration) -> Result<Option<Vec<u8>>> {
+            fn receive(&self, timeout: Duration) -> Result<Option<Heard>> {
                 let queue = if self.1 { &self.0.up } else { &self.0.down };
                 let deadline = std::time::Instant::now() + timeout;
                 loop {
-                    if let Some(frame) = queue.lock().expect("lock").pop_front() {
-                        return Ok(Some(frame));
+                    if let Some(heard) = queue.lock().expect("lock").pop_front() {
+                        return Ok(Some(heard));
                     }
                     if std::time::Instant::now() > deadline {
                         return Ok(None);
@@ -429,19 +453,23 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(1));
                 }
             }
+            fn waiting(&self) -> Waiting {
+                Waiting::Waits("the air waits")
+            }
         }
         let air = Arc::new(Air {
             up: Mutex::new(VecDeque::new()),
             down: Mutex::new(VecDeque::new()),
         });
-        let node = ZigbeeTransport::new(Arc::new(End(Arc::clone(&air), true)), 0)
+        let node = ZigbeeTransport::new(Arc::new(End(Arc::clone(&air), true, 0)), 0)
             .timing_out_after(Duration::from_secs(2));
         assert!(node.far_end().is_err(), "a real radio has no node inside");
+        assert!(!node.waiting().polled(), "the radio's own way of waiting");
         assert!(
             node.receive().expect("quiet").is_empty(),
             "nothing is not an error"
         );
-        let sender = ZigbeeTransport::new(Arc::new(End(air, false)), 0x1a2b)
+        let sender = ZigbeeTransport::new(Arc::new(End(air, false, 0x1a2b)), 0x1a2b)
             .speaking(0x0104, 0x0006)
             .timing_out_after(Duration::from_millis(200));
         let sending = std::thread::spawn(move || {

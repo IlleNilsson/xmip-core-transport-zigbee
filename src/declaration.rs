@@ -22,8 +22,9 @@ const SIXTEEN: Kind = Kind::Integer {
 };
 
 /// Every setting a Location takes beyond its address, which names the
-/// radio: `loopback`, the in-process node, is the one the estate has; an
-/// 802.15.4 radio joins when it exposes one.
+/// radio — an 802.15.4 interface of Linux's kernel, `wpan0`, or `loopback`,
+/// the in-process node — and then, for a send, the node and endpoint it
+/// goes to.
 pub const SETTINGS: &Settings = &Settings {
     technology: env!("CARGO_PKG_NAME"),
     settings: &[
@@ -34,7 +35,8 @@ pub const SETTINGS: &Settings = &Settings {
                 maximum: 0xfff7,
             },
             presence: Presence::Required,
-            meaning: "This node's short address in the network.",
+            meaning: "This node's short address in the network: on an interface, the \
+                      interface's own.",
             applies: Applies::Both,
         },
         Setting {

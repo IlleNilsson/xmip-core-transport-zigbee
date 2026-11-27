@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-transport-zigbee"
-description = "Zigbee transport: APS framing over the network layer — a Stream is one APS data frame, or a fragmented transmission of numbered blocks acknowledged by the receiver; a loopback radio stands in for the coordinator. A xmip-core-transport technology."
+description = "Zigbee transport: APS framing over the network layer — a Stream is one APS data frame, or a fragmented transmission of numbered blocks acknowledged by the receiver; an 802.15.4 interface of Linux's kernel, or a loopback radio in process. A xmip-core-transport technology."
 publish = false
 
 [lib]
@@ -14,12 +14,14 @@ path = "src/lib.rs"
 # A Technology depends on its parent Capability, never the reverse
 # (repository-model.md). Standard library otherwise: the framing is bytes
 # and the loopback is in this process. Its declaration takes the
-# capability's `timeout` (`transport::configured::timeout`).
+# capability's `timeout` (`transport::configured::timeout`), and its radio
+# is the capability's (`transport::ieee802154::Radio`).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
 # The `0x` number a target names (`codec::hex`).
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
-# The one refusal of a size over a ceiling (`net::ceiling`), and a target
-# read as a URI (`net::Target`).
+# The one refusal of a size over a ceiling (`net::ceiling`), a target read
+# as a URI (`net::Target`), and the kernel's 802.15.4 interface and what one
+# frame carries above its MAC (`net::ieee802154`).
 net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).

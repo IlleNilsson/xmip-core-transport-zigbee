@@ -9,9 +9,9 @@
 use net::ceiling;
 use transport::error::{Result, protocol_error};
 
-/// What the network layer may hand the MAC: a 127-byte PHY packet less the
-/// eleven bytes of a MAC header with short addresses and its check sequence.
-pub const MAX_NPDU: usize = 116;
+/// What the network layer may hand the MAC: what one 802.15.4 frame carries
+/// above its MAC header and check sequence.
+pub const MAX_NPDU: usize = net::ieee802154::MAX_PAYLOAD;
 /// The network header: two of frame control, two addresses, radius, sequence.
 const NWK_HEADER: usize = 8;
 /// The APS header of a data frame without the extended header.
