@@ -30,12 +30,9 @@
 //! sender and the cluster: `zigbee://loopback/0x1a2b/1?cluster=0x0402`.
 //!
 //! **Built with its `declaration` feature alone** the crate is
-//! [`declaration`], what a Location of it is configured with, wherever it
-//! is built, and none of the code above, which is behind the default
-//! feature: what the surfaces' library carries (ADR-0064, amendment
-//! 2026-11-26). The profile, the cluster and the wait a node takes unless
-//! told otherwise, `PROFILE`, `CLUSTER` and `TIMEOUT`, are declared there
-//! with it.
+//! [`declaration`]. It is the same wherever it is built. The profile, the
+//! cluster and the wait a node takes unless told otherwise, `PROFILE`,
+//! `CLUSTER` and `TIMEOUT`, are declared there with it.
 
 #[cfg(feature = "default")]
 mod configured;
